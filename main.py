@@ -27,11 +27,16 @@ class FaceVerificationSystem:
         self.config = {
             "enrollment_images_required": 5,
             "verification_threshold": 0.25,
-            "face_detection_model": "opencv",  # or "mtcnn", "retinaface"
+            "face_detection_model": "opencv",  # or "dlib", "mtcnn", "retinaface"
             "face_recognition_model": "VGG-Face",  # or "Facenet", "OpenFace", "DeepFace"
-            "min_face_size": (80, 80),
-            "max_face_size": (400, 400),
-            "quality_threshold": 0.7
+            "min_face_size": (30, 30),  # Further reduced to detect smaller faces
+            "max_face_size": (800, 800),  # Increased maximum size
+            "quality_threshold": 0.4,  # More lenient threshold
+            "detection_scale_factor": 1.03,  # More precise scaling
+            "detection_min_neighbors": 3,  # Fewer neighbors to detect more faces
+            "clahe_clip_limit": 2.0,  # For contrast enhancement
+            "use_eye_detection": True,  # Toggle eye detection
+            "eye_detection_required": False  # Make eye detection optional
         }
         
         # ********************
@@ -118,12 +123,18 @@ class FaceVerificationSystem:
             
     def detect_eyes_dlib(self, face_region):
         """Detect eyes using dlib's facial landmarks"""
+        if not self.config.get('use_eye_detection', True):
+            return []  # Skip eye detection if disabled
+            
         try:
             # Convert to grayscale for dlib
             gray = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
             
+            # Upsample the image for better detection of small faces
+            upsample = 1 if face_region.shape[0] > 100 else 2
+            
             # Detect face in the region
-            rects = self.detector(gray, 0)
+            rects = self.detector(gray, upsample)
             
             if len(rects) == 0:
                 return []
@@ -148,15 +159,43 @@ class FaceVerificationSystem:
     def detect_faces_enhanced(self, frame):
         """********************
         Enhanced face detection with quality assessment using dlib"""
+        # Create a copy of the frame for processing
+        processed_frame = frame.copy()
+        
         # Convert to grayscale for face detection
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
         
-        # Apply histogram equalization for better detection
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-        gray = clahe.apply(gray)
+        # Apply CLAHE for better contrast in different lighting conditions
+        clahe = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(clahe)
+        clahe = cv2.createCLAHE(
+            clipLimit=self.config.get('clahe_clip_limit', 3.0), 
+            tileGridSize=(8, 8)
+        )
+        cl = clahe.apply(l)
+        limg = cv2.merge((cl, a, b))
+        enhanced = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+        gray = cv2.cvtColor(enhanced, cv2.COLOR_BGR2GRAY)
         
-        # Detect faces using dlib
-        rects = self.detector(gray, 0)
+        # Apply Gaussian blur to reduce noise while preserving edges
+        gray = cv2.bilateralFilter(gray, 9, 75, 75)
+        
+        # Get detection parameters from config
+        scale_factor = self.config.get('detection_scale_factor', 1.05)
+        min_neighbors = self.config.get('detection_min_neighbors', 3)
+        
+        # Use OpenCV's Haar Cascade as a fallback if dlib fails
+        faces = self.face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=scale_factor,
+            minNeighbors=min_neighbors,
+            minSize=self.config["min_face_size"],
+            maxSize=self.config["max_face_size"],
+            flags=cv2.CASCADE_SCALE_IMAGE
+        )
+        
+        # Convert to dlib rectangles format
+        rects = [dlib.rectangle(x, y, x + w, y + h) for (x, y, w, h) in faces]
         
         quality_faces = []
         
@@ -177,11 +216,12 @@ class FaceVerificationSystem:
             # Assess quality
             quality = self.assess_face_quality(face_region)
             
-            # Check for eyes using dlib's facial landmarks
+            # Check for eyes if required
             eyes = self.detect_eyes_dlib(face_region)
+            eye_check_passed = not self.config.get('eye_detection_required', False) or len(eyes) >= 2
             
-            # If we found both eyes and the quality is good enough
-            if len(eyes) >= 2 and quality >= self.config["quality_threshold"]:
+            # If quality is good enough and eye check passes
+            if quality >= self.config["quality_threshold"] and eye_check_passed:
                 quality_faces.append((x, y, w, h, quality))
                 
         return quality_faces
@@ -437,8 +477,13 @@ class FaceVerificationSystem:
             
             # Display verification result
             if verification_result and time.time() - result_display_time < 3:
+                # Set color based on verification result
+                if "DIFFERENT PERSON" in verification_result:
+                    color = (0, 0, 255)  # Red for different person
+                else:
+                    color = (0, 255, 0)  # Green for same person
                 cv2.putText(display_frame, verification_result, (10, 200), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
             elif time.time() - result_display_time >= 3:
                 verification_result = ""
                 

@@ -12,8 +12,11 @@
     400
   ],
   "quality_threshold": 0.7,
-  "require_eyes": false,
-  "use_quality_filter": false,
   "detection_scale_factor": 1.1,
-  "detection_min_neighbors": 5
+  "detection_min_neighbors": 5,
+  "clahe_clip_limit": 2.0,
+  "use_eye_detection": true,
+  "eye_detection_required": false,
+  "require_eyes": false,
+  "use_quality_filter": false
 }
