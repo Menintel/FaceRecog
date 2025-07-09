@@ -8,6 +8,8 @@ import json
 import threading
 from datetime import datetime
 import logging
+import dlib
+from imutils import face_utils
 
 # ********************
 # Configure logging
@@ -49,7 +51,11 @@ class FaceVerificationSystem:
         # ********************
         # Enhanced face detection
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        self.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+        # Initialize dlib's face detector and facial landmark predictor
+        self.detector = dlib.get_frontal_face_detector()
+        # Download shape_predictor_68_face_landmarks.dat from:
+        # http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2
+        self.predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
         
     def setup_directories(self):
         """Create necessary directories"""
@@ -110,51 +116,79 @@ class FaceVerificationSystem:
             logger.error(f"Error assessing face quality: {e}")
             return 0.0
             
+    def detect_eyes_dlib(self, face_region):
+        """Detect eyes using dlib's facial landmarks"""
+        try:
+            # Convert to grayscale for dlib
+            gray = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
+            
+            # Detect face in the region
+            rects = self.detector(gray, 0)
+            
+            if len(rects) == 0:
+                return []
+                
+            # Get the facial landmarks
+            shape = self.predictor(gray, rects[0])
+            shape = face_utils.shape_to_np(shape)
+            
+            # Extract eye regions (indices for left and right eyes)
+            (lStart, lEnd) = face_utils.FACIAL_LANDMARKS_IDXS["left_eye"]
+            (rStart, rEnd) = face_utils.FACIAL_LANDMARKS_IDXS["right_eye"]
+            
+            left_eye = shape[lStart:lEnd]
+            right_eye = shape[rStart:rEnd]
+            
+            return [left_eye, right_eye]
+            
+        except Exception as e:
+            logger.error(f"Error in eye detection: {e}")
+            return []
+
     def detect_faces_enhanced(self, frame):
         """********************
-        Enhanced face detection with quality assessment"""
+        Enhanced face detection with quality assessment using dlib"""
+        # Convert to grayscale for face detection
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
         # Apply histogram equalization for better detection
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
         gray = clahe.apply(gray)
         
-        # Detect faces
-        faces = self.face_cascade.detectMultiScale(
-            gray,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=self.config["min_face_size"],
-            maxSize=self.config["max_face_size"],
-            flags=cv2.CASCADE_SCALE_IMAGE
-        )
+        # Detect faces using dlib
+        rects = self.detector(gray, 0)
         
-        # ********************
-        # Filter faces by quality and eye detection
         quality_faces = []
-        for (x, y, w, h) in faces:
+        
+        for rect in rects:
+            # Convert dlib's rectangle to OpenCV format (x, y, w, h)
+            x = rect.left()
+            y = rect.top()
+            w = rect.right() - x
+            h = rect.bottom() - y
+            
+            # Skip if face is too small or too large
+            if (w < self.config["min_face_size"][0] or h < self.config["min_face_size"][1] or
+                w > self.config["max_face_size"][0] or h > self.config["max_face_size"][1]):
+                continue
+                
             face_region = frame[y:y+h, x:x+w]
             
             # Assess quality
             quality = self.assess_face_quality(face_region)
             
-            # Check for eyes (indicates proper face orientation)
-            gray_face = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
-            eyes = self.eye_cascade.detectMultiScale(
-                gray_face,
-                scaleFactor=1.1,
-                minNeighbors=5,
-                maxSize=(100, 100)
-            )
+            # Check for eyes using dlib's facial landmarks
+            eyes = self.detect_eyes_dlib(face_region)
             
-            if quality >= self.config["quality_threshold"] and len(eyes) >= 2:
+            # If we found both eyes and the quality is good enough
+            if len(eyes) >= 2 and quality >= self.config["quality_threshold"]:
                 quality_faces.append((x, y, w, h, quality))
                 
         return quality_faces
         
     def draw_enhanced_face_info(self, frame, faces):
         """********************
-        Draw enhanced face information"""
+        Draw enhanced face information with eye landmarks"""
         for i, (x, y, w, h, quality) in enumerate(faces):
             # Color based on quality
             if quality >= 0.8:
@@ -164,15 +198,31 @@ class FaceVerificationSystem:
             else:
                 color = (0, 128, 255)  # Orange - fair
                 
-            # Draw rectangle
+            # Draw rectangle around face
             cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
+            
+            # Get face region and detect eyes
+            face_region = frame[y:y+h, x:x+w]
+            eyes = self.detect_eyes_dlib(face_region)
+            
+            # Draw eye landmarks
+            for eye in eyes:
+                if len(eye) > 0:
+                    # Convert points to absolute coordinates
+                    eye = np.array([(x + int(ex), y + int(ey)) for (ex, ey) in eye])
+                    # Draw convex hull around eye
+                    hull = cv2.convexHull(eye)
+                    cv2.drawContours(frame, [hull], -1, (0, 255, 0), 1)
+                    # Draw eye points
+                    for (ex, ey) in eye:
+                        cv2.circle(frame, (ex, ey), 2, (0, 0, 255), -1)
             
             # Face info
             cv2.putText(frame, f"Face {i+1}", (x, y-10), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
             cv2.putText(frame, f"Quality: {quality:.2f}", (x, y+h+20), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
-            cv2.putText(frame, f"{w}x{h}", (x, y+h+40), 
+            cv2.putText(frame, f"Eyes: {len(eyes)}", (x, y+h+40), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
                        
         return frame

@@ -24,3 +24,8 @@
 2025-07-09 16:02:36 - Result: SAME PERSON, Distance: 0.0902, Success: True
 2025-07-09 16:03:01 - Result: SAME PERSON, Distance: 0.1672, Success: True
 2025-07-09 16:03:06 - Result: SAME PERSON, Distance: 0.1605, Success: True
+2025-07-09 16:29:09 - Result: SAME PERSON, Distance: 0.0528, Success: True
+2025-07-09 16:29:34 - Result: SAME PERSON, Distance: 0.1731, Success: True
+2025-07-09 16:30:19 - Result: SAME PERSON, Distance: 0.2044, Success: True
+2025-07-09 16:30:22 - Result: SAME PERSON, Distance: 0.2248, Success: True
+2025-07-09 16:30:24 - Result: SAME PERSON, Distance: 0.1990, Success: True
