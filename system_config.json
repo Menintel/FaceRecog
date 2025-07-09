@@ -1,0 +1,19 @@
+{
+  "enrollment_images_required": 5,
+  "verification_threshold": 0.25,
+  "face_detection_model": "opencv",
+  "face_recognition_model": "VGG-Face",
+  "min_face_size": [
+    80,
+    80
+  ],
+  "max_face_size": [
+    400,
+    400
+  ],
+  "quality_threshold": 0.7,
+  "require_eyes": false,
+  "use_quality_filter": false,
+  "detection_scale_factor": 1.1,
+  "detection_min_neighbors": 5
+}
